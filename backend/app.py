@@ -11,7 +11,7 @@ from datetime import datetime
 app = Flask(__name__)
 
 # Enable CORS for all routes
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -67,12 +67,13 @@ with app.app_context():
 
     # Insert sample doctors if table is empty
     if Doctor.query.count() == 0:  # Check if the doctors table is empty
-        doctor1 = Doctor(name="Dr. Alice Johnson", specialization="Cardiologist", available=True)
-        doctor2 = Doctor(name="Dr. Bob Smith", specialization="Dermatologist", available=False)
-        doctor3 = Doctor(name="Dr. Carol Lee", specialization="Neurologist", available=True)
-        doctor4 = Doctor(name="Dr. David Wilson", specialization="Pediatrician", available=True)
-        
-        db.session.add_all([doctor1, doctor2, doctor3, doctor4])
+        sample_doctors = [
+            Doctor(name="Dr. Alice Johnson", specialization="Cardiologist", available=True),
+            Doctor(name="Dr. Bob Smith", specialization="Dermatologist", available=False),
+            Doctor(name="Dr. Carol Lee", specialization="Neurologist", available=True),
+            Doctor(name="Dr. David Wilson", specialization="Pediatrician", available=True)
+        ]
+        db.session.add_all(sample_doctors)
         db.session.commit()
         logger.info("Sample doctors added to the database.")
 
@@ -85,7 +86,7 @@ def home():
 @app.route("/doctors", methods=["GET"])
 def get_doctors():
     try:
-        doctors = Doctor.query.all()
+        doctors = Doctor.query.filter_by(available=True).all()  # Only available doctors
         return jsonify(doctors_schema.dump(doctors)), 200
     except Exception as e:
         logger.error(f"Error fetching doctors: {str(e)}")
@@ -97,11 +98,12 @@ def add_doctor():
     try:
         name = request.json.get("name")
         specialization = request.json.get("specialization")
+        available = request.json.get("available", True)  # Default to true if not specified
 
         if not name or not specialization:
             return jsonify({"message": "Both name and specialization are required."}), 400
 
-        new_doctor = Doctor(name=name, specialization=specialization)
+        new_doctor = Doctor(name=name, specialization=specialization, available=available)
         db.session.add(new_doctor)
         db.session.commit()
 
@@ -133,6 +135,8 @@ def book_appointment():
         doctor = Doctor.query.get(doctor_id)
         if not doctor:
             return jsonify({"message": "Doctor not found."}), 404
+        if not doctor.available:
+            return jsonify({"message": "Doctor is not available for booking."}), 400
 
         new_appointment = Appointment(patient_name=patient_name, doctor_id=doctor_id, date=date)
         db.session.add(new_appointment)
