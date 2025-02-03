@@ -7,9 +7,11 @@ import os
 import logging
 from datetime import datetime
 
-# Initialize the app
+# Initialize the Flask app
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})  # Enable CORS for all routes
+
+# Enable CORS for all routes
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -20,7 +22,7 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "hospital_management.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Initialize database and marshmallow
+# Initialize the database and Marshmallow
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 migrate = Migrate(app, db)
@@ -54,15 +56,16 @@ class AppointmentSchema(ma.SQLAlchemyAutoSchema):
         include_fk = True
         load_instance = True
 
-# Instantiate schemas
 doctor_schema = DoctorSchema()
 doctors_schema = DoctorSchema(many=True)
 appointment_schema = AppointmentSchema()
 appointments_schema = AppointmentSchema(many=True)
 
-# Insert sample data if doctors table is empty
-@app.before_first_request
-def insert_sample_data():
+# Create tables if they don't exist
+with app.app_context():
+    db.create_all()
+
+    # Insert sample doctors if table is empty
     if Doctor.query.count() == 0:  # Check if the doctors table is empty
         doctor1 = Doctor(name="Dr. Alice Johnson", specialization="Cardiologist", available=True)
         doctor2 = Doctor(name="Dr. Bob Smith", specialization="Dermatologist", available=False)
@@ -72,10 +75,6 @@ def insert_sample_data():
         db.session.add_all([doctor1, doctor2, doctor3, doctor4])
         db.session.commit()
         logger.info("Sample doctors added to the database.")
-
-# Create tables if they don't exist
-with app.app_context():
-    db.create_all()
 
 # Test Route
 @app.route("/")
@@ -147,6 +146,5 @@ def book_appointment():
         logger.error(f"Error booking appointment: {str(e)}")
         return jsonify({"message": f"An error occurred: {str(e)}"}), 500
 
-# Run the app
 if __name__ == "__main__":
     app.run(debug=True)
