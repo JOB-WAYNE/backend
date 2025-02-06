@@ -6,26 +6,35 @@ from flask_migrate import Migrate
 import os
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
+from supabase import create_client, Client
 
-# Initialize the Flask app
+# Load environment variables
+load_dotenv()
+
+# Initialize Flask app
 app = Flask(__name__)
 
-# Enable CORS for all routes
+# Enable CORS
 CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# SQLite Configuration
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "hospital_management.db")
+# PostgreSQL Configuration for SQLAlchemy
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("SUPABASE_DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Initialize the database and Marshmallow
+# Initialize database and Marshmallow
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 migrate = Migrate(app, db)
+
+# Initialize Supabase client
+url = "https://tapjyolyumtxqfvsukwi.supabase.co"  # Replace with your actual Supabase URL
+key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhcGp5b2x5dW10eHFmdnN1a3dpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzg4MjQ5MDksImV4cCI6MjA1NDQwMDkwOX0.YSXGAtvc6uo4o8_d5wHPWFIQ7JHb1D0Sb0dcsf-jNd8"  # Replace with your actual Supabase key
+supabase: Client = create_client(url, key)
 
 # Models
 class Doctor(db.Model):
@@ -61,44 +70,26 @@ doctors_schema = DoctorSchema(many=True)
 appointment_schema = AppointmentSchema()
 appointments_schema = AppointmentSchema(many=True)
 
-# Create tables if they don't exist
-with app.app_context():
-    db.create_all()
-
-    # Insert sample doctors if table is empty
-    if Doctor.query.count() == 0:  # Check if the doctors table is empty
-        sample_doctors = [
-            Doctor(name="Dr. Alice Johnson", specialization="Cardiologist", available=True),
-            Doctor(name="Dr. Bob Smith", specialization="Dermatologist", available=False),
-            Doctor(name="Dr. Carol Lee", specialization="Neurologist", available=True),
-            Doctor(name="Dr. David Wilson", specialization="Pediatrician", available=True)
-        ]
-        db.session.add_all(sample_doctors)
-        db.session.commit()
-        logger.info("Sample doctors added to the database.")
-
-# Test Route
+# Routes
 @app.route("/")
 def home():
     return jsonify({"message": "Flask Backend is Running"}), 200
 
-# Get all doctors
 @app.route("/doctors", methods=["GET"])
 def get_doctors():
     try:
-        doctors = Doctor.query.filter_by(available=True).all()  # Only available doctors
+        doctors = Doctor.query.filter_by(available=True).all()
         return jsonify(doctors_schema.dump(doctors)), 200
     except Exception as e:
         logger.error(f"Error fetching doctors: {str(e)}")
         return jsonify({"message": "Error fetching doctors"}), 500
 
-# Add a new doctor
 @app.route("/doctors", methods=["POST"])
 def add_doctor():
     try:
         name = request.json.get("name")
         specialization = request.json.get("specialization")
-        available = request.json.get("available", True)  # Default to true if not specified
+        available = request.json.get("available", True)
 
         if not name or not specialization:
             return jsonify({"message": "Both name and specialization are required."}), 400
@@ -106,6 +97,9 @@ def add_doctor():
         new_doctor = Doctor(name=name, specialization=specialization, available=available)
         db.session.add(new_doctor)
         db.session.commit()
+
+        # Insert the doctor into Supabase as well (if required)
+        supabase.table('doctors').insert({"name": name, "specialization": specialization, "available": available}).execute()
 
         logger.info(f"Doctor {name} added successfully.")
         return jsonify(doctor_schema.dump(new_doctor)), 201
@@ -115,7 +109,6 @@ def add_doctor():
         logger.error(f"Error adding doctor: {str(e)}")
         return jsonify({"message": f"An error occurred: {str(e)}"}), 500
 
-# Book an appointment
 @app.route("/appointments", methods=["POST"])
 def book_appointment():
     try:
@@ -126,7 +119,6 @@ def book_appointment():
         if not patient_name or not doctor_id or not date_str:
             return jsonify({"message": "Patient name, doctor ID, and date are required."}), 400
 
-        # Convert date from string to Python date object
         try:
             date = datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
@@ -142,6 +134,9 @@ def book_appointment():
         db.session.add(new_appointment)
         db.session.commit()
 
+        # Insert the appointment into Supabase as well (if required)
+        supabase.table('appointments').insert({"patient_name": patient_name, "doctor_id": doctor_id, "date": str(date)}).execute()
+
         logger.info(f"Appointment booked for {patient_name} with Dr. {doctor.name} on {date}.")
         return jsonify(appointment_schema.dump(new_appointment)), 201
 
@@ -149,6 +144,14 @@ def book_appointment():
         db.session.rollback()
         logger.error(f"Error booking appointment: {str(e)}")
         return jsonify({"message": f"An error occurred: {str(e)}"}), 500
+
+@app.route('/test_supabase', methods=['GET'])
+def test_supabase_connection():
+    try:
+        response = supabase.table('doctors').select('*').execute()
+        return jsonify({"message": "Connected to Supabase", "data": response.data}), 200
+    except Exception as e:
+        return jsonify({"message": "Failed to connect to Supabase", "error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)
